@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -26,6 +27,33 @@ logger = logging.getLogger(__name__)
 SCAN_LOOKBACK_SECONDS = 300
 
 
+def _first_tiktok_token(text: str) -> str | None:
+    """Return the first TikTok URL found in `text`, or None.
+
+    Telegram messages frequently contain a sentence that *contains* a TikTok URL
+    rather than being exactly the URL, so we scan for embedded URLs. We also treat
+    bare domain/path strings (without a scheme) as valid TikTok links, since users
+    paste them often.
+    """
+    # Fast path: the whole message is already a TikTok URL.
+    if is_tiktok_url(text):
+        return text
+
+    # Tokenize on whitespace + common wrapping punctuation.
+    tokens = re.split(
+        r"[\s,;:()|<>\\'\"\\\u201c\u201d\u2018\u2019]+",
+        text,
+    )
+    for token in tokens:
+        token = token.strip()
+        if not token:
+            continue
+        if is_tiktok_url(token):
+            return token
+
+    return None
+
+
 class TikTokSaverBot:
     def __init__(self, token: str):
         self.token = token
@@ -47,37 +75,44 @@ class TikTokSaverBot:
         return self.app
 
     def _extract_url_from_message(self, message) -> str | None:
+        """Extract a TikTok URL from a message.
+
+        Checks the message text, caption, and replied-to message text/caption.
+        Telegram merges forwarded message text into message.text, so forwarded
+        links are already covered there; we also inspect the caption because some
+        forwarded media posts only carry the text in the caption.
+
+        Returns the first TikTok URL found. If it is a non-video link (photo mode,
+        live, etc.) the raw URL is still returned so the caller can reject it with
+        a clear message.
         """
-        Extract a TikTok video URL from a message.
-        Checks: message text, replied-to message, forwarded content.
-        Returns the URL if it's a downloadable video, or the raw URL
-        if it's a non-video TikTok link (so we can reject it properly).
-        """
-        # Collect all candidate texts to check
-        candidates = []
+        if not message:
+            return None
 
-        # 1. Message text itself
-        if message.text:
-            candidates.append(message.text.strip())
+        candidates: list[str] = []
 
-        # 2. Reply-to message text
-        if message.reply_to_message and message.reply_to_message.text:
-            candidates.append(message.reply_to_message.text.strip())
+        def _add(text: str | None) -> None:
+            if text:
+                cleaned = text.strip()
+                if cleaned and cleaned not in candidates:
+                    candidates.append(cleaned)
 
-        # 3. Forwarded content — Telegram includes the original text
-        #    in message.text when forwarded, so it's already in candidates[0]
-        #    But if it's a channel forward, check caption too
-        if message.forward_sender_name or message.forward_date:
-            # Forwarded messages already have the text in message.text
-            pass
+        # 1. Message text (covers most forwards whose text is merged in).
+        _add(message.text)
+
+        # 2. Caption — forwarded media posts often put the link here.
+        _add(message.caption)
+
+        # 3. Reply-to message text/caption.
+        reply = message.reply_to_message
+        if reply:
+            _add(reply.text)
+            _add(reply.caption)
 
         for text in candidates:
-            if is_tiktok_url(text):
-                if is_video_url(text):
-                    return text
-                else:
-                    # Non-video TikTok URL (photo, live, etc.)
-                    return text
+            url = _first_tiktok_token(text)
+            if url:
+                return url
 
         return None
 
@@ -89,11 +124,15 @@ class TikTokSaverBot:
         await update.message.reply_text(
             f"👋 Hi {user.first_name}! I'm SWTikSaver.\n\n"
             f"📥 Send me any TikTok video link and I'll download it for you.\n\n"
-            f"Supported links:\n"
-            f"  • tiktok.com/video/...\n"
+            f"Supported links (any TikTok content URL):\n"
+            f"  • tiktok.com/@user/video/ID\n"
+            f"  • tiktok.com/@user/status/ID\n"
+
             f"  • vm.tiktok.com/...\n"
             f"  • vt.tiktok.com/...\n"
-            f"  • Any TikTok share link\n\n"
+            f"  • m.tiktok.com/...\n"
+            f"  • Any tiktok.com/@user/... link\n"
+            f"  • Any link containing a TikTok domain\n\n"
             f"💡 You can also reply to a message containing a TikTok link "
             f"or forward a message with a link.\n\n"
             f"Try sending a TikTok URL now! 🎵",
@@ -108,12 +147,14 @@ class TikTokSaverBot:
             "📖 **SWTikSaver Help**\n\n"
             "Send any TikTok video URL and I'll download & send it back to you.\n\n"
             "**Supported URL types:**\n"
-            "• `tiktok.com/video/ID`\n"
+            "• `tiktok.com/@user/video/ID`\n"
             "• `tiktok.com/@user/status/ID`\n"
+            "• `tiktok.com/t/...` (short links)\n"
             "• `vm.tiktok.com/...`\n"
             "• `vt.tiktok.com/...`\n"
             "• `m.tiktok.com/...`\n"
-            "• Any TikTok share link\n\n"
+            "• Any `tiktok.com/@user/...` link\n"
+            "• Any link containing a TikTok domain\n\n"
             "**How to use:**\n"
             "• Paste a TikTok link directly\n"
             "• Reply to a message that contains a TikTok link\n"
@@ -139,7 +180,7 @@ class TikTokSaverBot:
         user = message.from_user
         chat_title = message.chat.title if message.chat else "DM"
         is_reply = message.reply_to_message is not None
-        is_forward = message.forward_date is not None
+        is_forward = bool(getattr(message, "forward_date", None))
 
         logger.info(
             "TikTok URL from %s (%s) in %s: %s%s%s",
