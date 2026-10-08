@@ -1,35 +1,43 @@
 # SWTikSaver
 
-A Telegram bot that saves TikTok videos. Send a TikTok URL and get the video back!
+A Telegram bot that saves TikTok videos. Send any TikTok URL and get the video back!
 
-**Live as of October 2026** — uses `python-telegram-bot==22.8` and `yt-dlp==2026.8.19`
+**As of October 2026** — uses `python-telegram-bot==22.8` and `yt-dlp==2026.8.19`
 
 ## Features
 
-- Send any TikTok video link and receive the video file
-- Works with `tiktok.com`, `vm.tiktok.com`, and `vt.tiktok.com` links
-- Always-on on Render (Background Worker)
+- 📥 Download any TikTok video by sending the link
+- 🔗 Supports ALL TikTok URL types:
+  - `tiktok.com/@user/video/ID`
+  - `tiktok.com/@user/status/ID`
+  - `tiktok.com/t/...` (short links)
+  - `vm.tiktok.com/...` (share links)
+  - `vt.tiktok.com/...` (Tap to view)
+  - `m.tiktok.com/...` (mobile)
+  - Any link containing a TikTok domain
+- 👋 `/start` — welcome message
+- 📖 `/help` — usage info
+- 🔄 Scans for messages received while bot was offline
+- ⏱️ Retries download up to 3 times on failure
 
 ## Quick Setup
 
 ### 1. Create a Telegram Bot
 
-1. Open Telegram and search for **@BotFather**
-2. Send `/newbot` and follow the instructions
-3. Copy the **Bot Token** (looks like `123456:ABC-DEF1234...`)
+1. Open Telegram → search **@BotFather**
+2. Send `/newbot` → follow prompts → copy the token
 
 ### 2. Deploy on Render
 
-**Recommended:** Use a **Background Worker** (not a Web Service) so the bot stays connected to Telegram's polling API.
+**Recommended:** Use a **Background Worker** (not a Web Service).
 
 1. Push this repo to GitHub
 2. Go to [render.com](https://render.com) → **New** → **Background Worker**
 3. Connect your GitHub repo
 4. Configure:
-   - **Name:** `swtiksaver` (or your choice)
+   - **Name:** `swtiksaver`
    - **Region:** closest to you
    - **Branch:** `main`
-   - **Root Directory:** leave blank
    - **Runtime:** `Python 3`
    - **Build Command:** `pip install -r requirements.txt`
    - **Start Command:** `python worker.py`
@@ -39,31 +47,32 @@ A Telegram bot that saves TikTok videos. Send a TikTok URL and get the video bac
    - **Value:** your bot token from BotFather
 6. Click **Create Worker**
 
-> **Web Service alternative:** If you prefer a Web Service, use `python worker.py` as the start command. The free tier spins down after 15 min of inactivity — first message will take ~30s to respond.
-
 ### 3. Verify Deployment
 
-Check the Render dashboard logs — you should see:
+Check Render logs — you should see:
 ```
 INFO:swtiksaver:Starting SWTikSaver bot...
+INFO:bot:SWTikSaver bot is starting...
+INFO:telegram.ext.Application - Application started
 ```
-
-If the worker crashes, check logs for errors.
 
 ## Usage
 
 1. Open your bot in Telegram
-2. Send `/start` to activate
-3. Forward or paste any TikTok video link
-4. The bot will download and send the video back
+2. Send `/start` for a welcome message
+3. Send `/help` for usage info
+4. Paste any TikTok video link
+5. Bot downloads and sends the video back
+
+If the bot was offline when you sent a link, it will process it when it comes back online (scans last 5 minutes of messages).
 
 ## Project Structure
 
 ```
 .
-├── worker.py              # Entry point for Render (reads env, starts bot)
-├── bot.py                 # Telegram bot handler (listens for URLs, replies with video)
-├── tiktok_downloader.py   # yt-dlp wrapper for downloading TikTok videos
+├── worker.py              # Entry point for Render
+├── bot.py                 # Telegram bot (handlers, scanning, URL detection)
+├── tiktok_downloader.py   # yt-dlp wrapper with retry logic
 ├── requirements.txt       # python-telegram-bot==22.8, yt-dlp==2026.8.19
 ├── Procfile               # Process type for Render
 └── README.md
@@ -71,28 +80,28 @@ If the worker crashes, check logs for errors.
 
 ## Dependencies
 
-| Package              | Version  | Purpose                        |
-|----------------------|----------|--------------------------------|
-| python-telegram-bot  | 22.8     | Telegram Bot API (async, PTB v22) |
-| yt-dlp               | 2026.8.19| Video downloading              |
+| Package              | Version   | Purpose                        |
+|----------------------|-----------|--------------------------------|
+| python-telegram-bot  | 22.8      | Telegram Bot API (async)       |
+| yt-dlp               | 2026.8.19 | Video downloading              |
 
 ## Updating yt-dlp
 
-TikTok changes their platform frequently. If downloads stop working, update `yt-dlp`:
+TikTok changes frequently. If downloads stop working:
 
 ```bash
 pip install -U yt-dlp
-# then update requirements.txt and redeploy
+# Update requirements.txt and redeploy
 ```
 
 ## Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
-| Worker won't start | Check `TELEGRAM_BOT_TOKEN` is set in Render env vars |
+| Worker won't start | Check `TELEGRAM_BOT_TOKEN` in Render env vars |
 | "No module named 'telegram'" | Ensure build command is `pip install -r requirements.txt` |
-| Downloads fail | Update `yt-dlp` to latest version |
-| Bot not responding | Check Render logs for errors; verify bot is not blocked in Telegram |
+| Downloads fail with "unexpected response" | TikTok server issue — retry later, or update yt-dlp |
+| Bot not responding | Check Render logs; verify bot not blocked in Telegram |
 
 ## License
 

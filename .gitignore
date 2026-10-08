@@ -11,3 +11,4 @@ build/
 .pytest_cache/
 temp_tiktok*/
 tiktok_*/
+.env
