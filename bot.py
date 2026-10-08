@@ -23,7 +23,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# How far back to scan for unprocessed messages (seconds)
 SCAN_LOOKBACK_SECONDS = 300  # 5 minutes
 
 
@@ -39,13 +38,9 @@ class TikTokSaverBot:
         """Build and configure the bot application."""
         self.app = Application.builder().token(self.token).build()
 
-        # Handle /start command
         self.app.add_handler(CommandHandler("start", self.handle_start))
-
-        # Handle /help command
         self.app.add_handler(CommandHandler("help", self.handle_help))
 
-        # Handle any text message that looks like a TikTok URL
         handler = MessageHandler(
             filters.TEXT & ~filters.COMMAND,
             self.handle_message,
@@ -100,7 +95,6 @@ class TikTokSaverBot:
 
         text = message.text.strip()
 
-        # Check if it's a TikTok URL using the improved detector
         if not is_tiktok_url(text):
             return
 
@@ -112,7 +106,6 @@ class TikTokSaverBot:
             text,
         )
 
-        # Send loading message
         loading_msg = await message.reply_text(
             "🎵 Downloading TikTok video...\nPlease wait a moment!"
         )
@@ -134,7 +127,6 @@ class TikTokSaverBot:
             error_msg = str(e)
             logger.error("Error downloading video: %s", error_msg)
 
-            # Provide helpful error messages
             if "copyright" in error_msg.lower() or "private" in error_msg.lower():
                 await loading_msg.edit_text(
                     "⚠️ This video might be private, removed, or has download restrictions.\n"
@@ -153,10 +145,7 @@ class TikTokSaverBot:
                 )
 
     async def scan_recent_messages(self):
-        """
-        Scan for recent unprocessed messages in all chats the bot is in.
-        This runs once at startup to catch messages received while the bot was offline.
-        """
+        """Scan for recent unprocessed messages from while bot was offline."""
         if not self.app:
             return
 
@@ -164,7 +153,9 @@ class TikTokSaverBot:
 
         try:
             now = int(time.time())
-            oldest_allowed = now - SCAN_LOOKBACK_SECONDS
+            oldest_allowed = datetime.fromtimestamp(
+                now - SCAN_LOOKBACK_SECONDS, tz=timezone.utc
+            )
 
             updates = await self.app.bot.get_updates(
                 offset=-1,
@@ -179,9 +170,7 @@ class TikTokSaverBot:
                     continue
 
                 msg_time = update.message.date
-                if msg_time and msg_time >= datetime.fromtimestamp(
-                    oldest_allowed, tz=timezone.utc
-                ):
+                if msg_time and msg_time >= oldest_allowed:
                     text = update.message.text.strip()
                     if is_tiktok_url(text):
                         user_info = (
@@ -222,27 +211,20 @@ class TikTokSaverBot:
         except Exception as e:
             logger.warning("Error scanning recent messages: %s", e)
 
-    async def run_async(self):
-        """Async entry point: scan first, then poll."""
-        self.build_application()
-        logger.info("SWTikSaver bot is starting...")
-
-        # Scan for messages that arrived while bot was offline
+    async def post_init(self, app: Application):
+        """Called after the application is initialized.
+        Use this to scan for offline messages before polling starts.
+        """
+        logger.info("Post-init: scanning for offline messages...")
         await self.scan_recent_messages()
-
-        # Start polling
-        await self.app.run_polling(allowed_updates=Update.ALL_TYPES)
+        logger.info("Post-init complete, starting polling...")
 
     def run(self):
-        """Synchronous entry point for Render."""
+        """Start the bot. PTB handles the event loop internally."""
         self.build_application()
+
+        # Register post_init hook — PTB calls this after setup, before polling
+        self.app.post_init = self.post_init
+
         logger.info("SWTikSaver bot is starting...")
-
-        # Build and start the async event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        try:
-            loop.run_until_complete(self.run_async())
-        finally:
-            loop.close()
+        self.app.run_polling(allowed_updates=Update.ALL_TYPES)
